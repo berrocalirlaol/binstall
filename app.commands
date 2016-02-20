@@ -1,0 +1,10 @@
+#!/bin/bash
+
+declare jboss_install_command='unzip ${jboss_file_name}.${jboss_file_ext} -d ./jbosses'
+declare jboss_set_home='echo "JBOSS_HOME=${INSTALL_FOLDER}/jbosses/jboss-6.1.0.Final" >> env_variables'
+declare jboss_set_path='echo "PATH=\${JBOSS_HOME}/bin:\${PATH}" >> path'
+
+declare mysql_install_command='tar xvf ${FILE_NAME}.${FILE_EXT}; rm -rf mysql-5.5; mv ${FILE_NAME} mysql-5.5'
+declare mysql_set_home='echo "MYSQL_HOME=${INSTALL_FOLDER}/mysql-5.5" >> ${WORKSPACE}/env_variables'
+declare mysql_set_path='echo "PATH=\${MYSQL_HOME}/bin:\${PATH}" >> ${WORKSPACE}/path'
+
