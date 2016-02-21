@@ -2,10 +2,10 @@
 source nexage.properties
 source binstall.sh
 
-#echo -e "\n-------------------------------------------------"
-#echo -e "Installing JBoss in ${jboss_install_folder}"
-#binstall_folder ${jboss_install_folder} ${user_password}
-#binstall jboss
+echo -e "\n-------------------------------------------------"
+echo -e "Installing JBoss in ${jboss_install_folder}"
+binstall_folder ${jboss_install_folder} ${user_password}
+binstall jboss
 
 export JBOSS_SERVER=${jboss_install_folder}/jboss-6.1.0.Final/server
 #echo -e "\n-------------------------------------------------"
