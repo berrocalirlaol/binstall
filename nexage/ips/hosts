@@ -1,0 +1,38 @@
+127.0.0.1	localhost
+127.0.1.1	mint-VirtualBox
+
+# The following lines are desirable for IPv6 capable hosts
+::1     ip6-localhost ip6-loopback
+fe00::0 ip6-localnet
+ff00::0 ip6-mcastprefix
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+
+127.0.0.1 mysql.sbx
+
+127.0.0.2 nexus1.sbx
+127.0.0.2 nexus2.sbx
+127.0.0.2 nexus3.sbx
+127.0.0.2 nexus4.sbx
+127.0.0.2 nexus5.sbx
+127.0.0.2 nexus6.sbx
+127.0.0.2 nexus7.sbx
+127.0.0.2 nexus8.sbx
+127.0.0.2 nexus9.sbx
+127.0.0.4 hazelcast.sbx
+127.0.0.5 exchange-node1.sbx
+127.0.0.6 exchange-common1.sbx
+127.0.0.7 exchange-node2.sbx
+127.0.0.8 exchange-common2.sbx
+ 
+127.0.0.9 mediation-node1.sbx
+127.0.0.10 mediation-node2.sbx
+127.0.0.11 mediation-common1.sbx
+127.0.0.12 mediation-common2.sbx
+127.0.0.13 adserver-node1.sbx
+127.0.0.14 adserver-common1.sbx
+127.0.0.15 adnet.sbx
+127.0.0.16 bidder.sbx
+ 
+ 
+127.0.0.17 geneva.sbx
