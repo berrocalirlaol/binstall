@@ -29,3 +29,5 @@ cp -R ${JBOSS_SERVER}/nexage ${JBOSS_SERVER}/geneva
 #echo -e "\n-------------------------------------------------"
 #echo -e "Create JBoss install folders in ${INSTALLS_HOME}"
 cp -R ./nexage/installs/* ${INSTALLS_HOME}
+
+echo ${user_password} | sudo -S mkdir -p /opt/creative/bidder
