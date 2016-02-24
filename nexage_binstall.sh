@@ -8,9 +8,9 @@ source binstall.sh
 #./nexage/nexage_maven.sh
 #./nexage/nexage_mysql.sh
 #./nexage/nexage_ant.sh
-./nexage/nexage_antinstaller.sh
+#./nexage/nexage_antinstaller.sh
 #./nexage/nexage_mongodb.sh
-#./nexage/nexage_ips.sh
+./nexage/nexage_ips.sh
 
 
 

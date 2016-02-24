@@ -7,9 +7,10 @@ echo -e "Installing JBoss in ${jboss_install_folder}"
 binstall_folder ${jboss_install_folder} ${user_password}
 binstall jboss
 
-export JBOSS_SERVER=${jboss_install_folder}/jboss-6.1.0.Final/server
-#echo -e "\n-------------------------------------------------"
-#echo -e "Installing Nexage JBoss servers in ${JBOSS_SERVER}"
+export JBOSS_HOME=${jboss_install_folder}/jboss-6.1.0.Final
+export JBOSS_SERVER=${JBOSS_HOME}/server
+echo -e "\n-------------------------------------------------"
+echo -e "Installing Nexage JBoss servers in ${JBOSS_SERVER}"
 cp -f ./nexage/jboss/ecj-4.4.jar ${JBOSS_HOME}/lib/endorsed/
 
 cp -Rp ${JBOSS_SERVER}/default ${JBOSS_SERVER}/nexage
@@ -26,8 +27,13 @@ cp -R ${JBOSS_SERVER}/nexage ${JBOSS_SERVER}/mnode
 cp -R ${JBOSS_SERVER}/nexage ${JBOSS_SERVER}/mnode2
 cp -R ${JBOSS_SERVER}/nexage ${JBOSS_SERVER}/geneva
 
-#echo -e "\n-------------------------------------------------"
-#echo -e "Create JBoss install folders in ${INSTALLS_HOME}"
-cp -R ./nexage/installs/* ${INSTALLS_HOME}
+echo -e "\n-------------------------------------------------"
+echo -e "Create JBoss install folders in ${INSTALL_HOME}"
+cp -R ./nexage/installs/* ${INSTALL_HOME}
 
+echo -e "\n-------------------------------------------------"
+echo "Copy .conf files in ${CONFIG_HOME}"
+cp ./nexage/jboss/*.conf ${CONFIG_HOME}
+
+echo "Geneva configuration"
 echo ${user_password} | sudo -S mkdir -p /opt/creative/bidder
