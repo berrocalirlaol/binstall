@@ -1,0 +1,747 @@
+#!/bin/bash
+# Features of this environment
+# start -> starts jboss as appropriate for the environment in the shell
+# stop -> stops jboss running in the shell
+# wait_for_server -> poll the current app for up to 90 seconds to see if it has finished booting up
+# sdebug y|n -> if remote debug is enabled, suspend jboss at the beginning of its boot sequence and wait for the debugger to attach
+# builds -> build all projects related to the selected component including the installer
+# install -> install the kit related to the environment, bringing up the UI
+# installc -> install the kit related to the environment without asking any questions
+# jtail -> start tailing the JBoss log of the current app to the console
+# 
+# How to select a component
+# at the command line type similar to the following,  if you are building a branch also speciy the branch extension
+# 
+# mnode
+# mnode2 sprint150
+# nexus
+# nexusjetty
+# dbinstall
+# 
+# cd log -> change directory directory to the log directory of the jboss associated with the environement
+# you can build individual projects by entering their alias, see bottom of the file
+#
+# The "tests" environemnt allows you to fire off the functional tests with either "mftest" or "eftest" for exmaple
+
+if [[ -f "$HOME/nexage-user.env" ]]; then
+    source $HOME/nexage-user.env # Your overrides go here
+fi
+export WORKSPACE=${WORKSPACE:-~/workspace}
+export DEFAULT_WORKSPACE=$WORKSPACE
+export GITSPACE=${GITSPACE:=${GIT_WORKSPACE:-~/git}}
+export SUSPEND=n # Only necessary when you want to debug the entire server bootup - use sdebug y|n
+export HNAME=localhost
+export KIT_REPO=${KIT_REPO:-~/kits_for_validation}
+export INSTALL_HOME=${INSTALL_HOME:-~/installs}
+export CONFIG_HOME=${CONFIG_HOME:-~}
+export DEFAULT_RUN_CONF=${DEFAULT_RUN_CONF:-$CONFIG_HOME/run.conf}
+export JMEMSIZE=${JMEMSIZE:-1024m}
+export JSKSIZE=${JSKSIZE:-192k}
+
+export PS1="\n\[\e[33m\]\w\[\e[0m\]\n\$ "
+
+function expectExistsOnDisk() {
+    LOC_NAME=$1
+    eval LOC_VALUE=\$$LOC_NAME
+    if [[ "$LOC_VALUE" == "" ]]; then
+        echo "Warning: location $LOC_NAME not defined"
+        return 2
+    fi
+    if [ ! -e $LOC_VALUE ]; then
+        echo "Warning: location $LOC_NAME=$LOC_VALUE does not exist on disk"
+        return 1
+    fi
+}
+
+function setPortsToDefault() {
+    export HTTPPORT=8080
+    export DEBUGPORT=8787
+    export SDPORT=1090
+    export PORTOFFSET=0
+    export PORTGROUP=ports-default
+}
+
+function setHostToDefault() {
+    export HNAME=localhost
+}
+
+function setRunConfToDefault() {
+    export RUN_CONF=$DEFAULT_RUN_CONF
+}
+
+setPortsToDefault
+setHostToDefault
+setRunConfToDefault
+
+expectExistsOnDisk WORKSPACE
+expectExistsOnDisk GITSPACE
+expectExistsOnDisk KIT_REPO
+expectExistsOnDisk INSTALL_HOME
+expectExistsOnDisk RUN_CONF
+expectExistsOnDisk ANT_HOME
+expectExistsOnDisk ANTINSTALLER_HOME
+
+if [[ "$OSTYPE" == "cygwin" ]]; then # Steps for windows
+	export JBOSS_HOME=${JBOSS_HOME:-`cygpath -w /cygdrive/c/opt/jbosses/jboss-6.1.0.Final`}
+    export TOMCAT_HOME=${TOMCAT_HOME:-`cygpath -w /cygdrive/c/opt/apache-tomcat-7.0.54`}
+    export JETTY_BASE=${JETTY_BASE:-`cygpath -w /cygdrive/c/opt/jetty`}
+    export JETTY_HOME=${JETTY_HOME:-`cygpath -w /cygdrive/c/opt/jetty/jetty-distribution-9.3.6.v20151106`}
+    export HAZEL_HOME=${HAZEL_HOME:-`cygpath -w /cygdrive/c/opt/hazelcast/hazelcast-3.2.4`}
+else # Steps for Mac, should also work on Linux
+	export PS1='\u:\w\$ '
+	function settitle() { echo -ne "\033]0;$@\007"; }
+	export JBOSS_HOME=${JBOSS_HOME:-/opt/jbosses/jboss-6.1.0.Final}
+	export TOMCAT_HOME=${TOMCAT_HOME:-/opt/apache-tomcat-7.0.54}
+	export JETTY_BASE=${JETTY_BASE:-/opt/jetty}
+	export JETTY_HOME=${JETTY_HOME:-/opt/jetty/jetty-distribution-9.3.0.v20150612}
+	export HAZEL_HOME=${HAZEL_HOME:-/opt/hazelcast/hazelcast-3.2.4}
+fi
+
+expectExistsOnDisk JBOSS_HOME
+
+function start() {
+  echo $APP_START_COMMAND
+  if [[ "$APP_START_COMMAND" != "" ]]; then
+#    echo $APP_START_COMMAND
+    eval $APP_START_COMMAND
+  else
+    echo nothing to start yet
+    false
+  fi
+}
+
+function start_debug() {
+  if [[ "$APP_START_COMMAND" != "" ]]; then
+    JAVA_OPTS_PREV=$JAVA_OPTS
+    export JAVA_OPTS="-Xdebug -Xnoagent -Xrunjdwp:transport=dt_socket,server=y,suspend=${SUSPEND:-n},address=$DEBUGPORT"
+    eval $APP_START_COMMAND
+    RETVAL=$?
+    export JAVA_OPTS=$JAVA_OPTS_PREV
+    return $RETVAL
+  else
+    echo nothing to start yet
+    false
+  fi
+}
+
+function stop() {
+  echo $APP_STOP_COMMAND
+  if [[ "$APP_STOP_COMMAND" != "" ]]; then
+    eval $APP_STOP_COMMAND
+  else
+    echo nothing to stop yet
+    false
+  fi
+}
+
+function builds() {
+  if [[ "$APP_BUILD_COMMAND" != "" ]]; then
+    eval $APP_BUILD_COMMAND
+  else
+    echo nothing to build yet
+    false
+  fi
+}
+
+function setws() {
+    export WORKSPACE=$1;
+}
+
+function sdebug() {
+    export SUSPEND=$1;
+}
+
+function setCDPATH() {
+    if [[ "$OSTYPE" == "cygwin" ]]; then
+        export CDPATH=.:$WORKSPACE:`cygpath -u $JBOSS_HOME/server/$JCONF`;
+    else
+        export CDPATH=.:$WORKSPACE:$JBOSS_HOME/server/$JCONF;
+    fi
+}
+
+function renameInstallDirs() {
+    cp -Rf $INSTALL_HOME/mnode $INSTALL_HOME/mediation_node
+    cp -Rf $INSTALL_HOME/mnode2 $INSTALL_HOME/mediation_node2
+    cp -Rf $INSTALL_HOME/mcommon $INSTALL_HOME/mediation_common
+    cp -Rf $INSTALL_HOME/mcommon2 $INSTALL_HOME/mediation_common2
+    cp -Rf $INSTALL_HOME/enode $INSTALL_HOME/exchange_node
+    cp -Rf $INSTALL_HOME/enode2 $INSTALL_HOME/exchange_node2
+    cp -Rf $INSTALL_HOME/ecommon $INSTALL_HOME/exchange_common
+    cp -Rf $INSTALL_HOME/ecommon2 $INSTALL_HOME/exchange_common2
+    cp -Rf $INSTALL_HOME/asnode $INSTALL_HOME/adserver_node
+    cp -Rf $INSTALL_HOME/asnode2 $INSTALL_HOME/adserver_node2
+    cp -Rf $INSTALL_HOME/ascommon $INSTALL_HOME/adserver_common
+    cp -Rf $INSTALL_HOME/ascommon2 $INSTALL_HOME/adserver_common2
+    cp -Rf $INSTALL_HOME/bnode $INSTALL_HOME/bidder_node
+    cp -Rf $INSTALL_HOME/bnode2 $INSTALL_HOME/bidder_node2
+    cp -Rf $INSTALL_HOME/bcommon $INSTALL_HOME/bidder_common
+    cp -Rf $INSTALL_HOME/bcommon2 $INSTALL_HOME/bidder_common2
+}
+
+function builder() {
+    local directory=$1
+    if [[ ! -z $BRANCH ]]
+      then
+        directory=$directory"-"$BRANCH;
+        if [[ ! -e $directory || ! -d $directory ]]
+          then
+            return;
+            echo "AFTER RETURN";
+        fi
+    fi
+    MVN_OVERRIDES=""
+    if [[ -d "$ANTINSTALLER_HOME" ]]; then
+      MVN_OVERRIDES="-Dai.dir=$ANTINSTALLER_HOME"
+    fi
+    if [[ -d "$ANT_HOME" ]]; then
+      MVN_OVERRIDES="$MVN_OVERRIDES -Dant.lib.dir=$ANT_HOME/lib"
+    fi
+    pushd $directory && mvn clean install $2 $MVN_OVERRIDES && popd;
+}
+
+function builderNoTest() {
+    builder $1 -Dmaven.test.skip=true;
+}
+
+function other() {
+    export HTTPPORT=8980
+    export SDPORT=1990
+    export DEBUGPORT=9999
+    export HNAME=localhost
+    export JCONF=other
+    nextgen $1
+    settitle "other $1"
+}
+
+function mnodejetty() {
+    #export HTTPPORT=8280
+    export INSTALL_DIR=$INSTALL_HOME/mnodejetty;
+    export HNAME=mediation-node1.sbx;
+    export SDPORT=28284;
+    export JETTY_BASE=`cygpath -w /cygdrive/c/opt/jetty/mnode`;
+    nextgen $1;
+    export INSTALLER_PROJECT=mediation-installer-jetty;
+    export APP_START_COMMAND=$APP_START_COMMAND_JETTY
+    export APP_STOP_COMMAND=$APP_STOP_COMMAND_JETTY
+    settitle "mnodejetty $1";
+}
+
+function mnode() {
+#    export HTTPPORT=8080
+#    export SDPORT=1090;
+#    export DEBUGPORT=8787;
+    setPortsToDefault
+    export HNAME=mediation-node1.sbx
+    export JCONF=mnode;
+    export INSTALL_DIR=$INSTALL_HOME/mediation_node;
+    nextgen $1;
+    settitle "mnode $1";
+}
+
+function mnode2() {
+#    export HTTPPORT=8480
+#    export SDPORT=1490;
+#    export DEBUGPORT=9787;
+    setPortsToDefault
+    export HNAME=mediation-node2.sbx
+    export JCONF=mnode2;
+    export INSTALL_DIR=$INSTALL_HOME/mediation_node2;
+    nextgen $1;
+    settitle "mnode2 $1";
+}
+
+function mcommonjetty() {
+    #export HTTPPORT=8280
+    export INSTALL_DIR=$INSTALL_HOME/mcommonjetty;
+    export HNAME=mediation-common1.sbx;
+    export SDPORT=28283;
+    export JETTY_BASE=`cygpath -w /cygdrive/c/opt/jetty/mcommon`;
+    nextgen $1;
+    export INSTALLER_PROJECT=mediation-installer-jetty;
+    export APP_START_COMMAND=$APP_START_COMMAND_JETTY
+    export APP_STOP_COMMAND=$APP_STOP_COMMAND_JETTY
+    settitle "mcommonjetty $1";
+}
+
+function mcommon() {
+#    export HTTPPORT=8180
+#    export DEBUGPORT=8686;
+#    export SDPORT=1190;
+    setPortsToDefault
+    export HNAME=mediation-common1.sbx
+    export JCONF=mcommon;
+    export INSTALL_DIR=$INSTALL_HOME/mediation_common;
+    nextgen $1;
+    settitle "mcommon $1";
+}
+
+function mcommon2() {
+#    export HTTPPORT=8580
+#    export DEBUGPORT=9686;
+#    export SDPORT=1590;
+    setPortsToDefault
+    export HNAME=mediation-common2.sbx
+    export JCONF=mcommon2;
+    export INSTALL_DIR=$INSTALL_HOME/mediation_common2;
+    nextgen $1;
+    settitle "mcommon2 $1";
+}
+
+function nexusjetty() {
+    #export HTTPPORT=8280
+    export INSTALL_DIR=$INSTALL_HOME/nexusjetty;
+    export HNAME=nexus1.sbx;
+    export SDPORT=28282;
+    export JMEMSIZE=2560m
+    export JETTY_BASE=`cygpath -w /cygdrive/c/opt/jetty/nexus`;
+    nextgen $1;
+    export INSTALLER_PROJECT=nexus-installer-jetty;
+    export APP_START_COMMAND=$APP_START_COMMAND_JETTY
+    export APP_STOP_COMMAND=$APP_STOP_COMMAND_JETTY
+    settitle "nexusjetty $1";
+}
+
+function nexus() {
+    export RUN_CONF=~/nexus.run.conf
+#    export HTTPPORT=8280
+#    export DEBUGPORT=8788;
+#    export SDPORT=1290;
+    setPortsToDefault
+    export HNAME=nexus1.sbx
+    export JCONF=nexus;
+    export INSTALL_DIR=$INSTALL_HOME/nexus;
+    nextgen $1;
+    export APP_BUILD_COMMAND='butils && bagg && bcoreNT && bcache && bnexus && binstaller';
+    export TAG_PREFIX=Nexus;
+    export INSTALLER_PROJECT=nexus-installer;
+    settitle "nexus $1";
+}
+
+function nextgen() {
+    export TAG_PREFIX=NEXTGEN;
+    export BRANCH=$1;
+    export INSTALLER_PROJECT=mediation-installer;
+    setws $DEFAULT_WORKSPACE
+    setCDPATH;
+    export APP_BUILD_COMMAND='butils && beventcom && bclickms && beventflume && bcountry && bmmodel && bagg && bcache && bmnode && bmcommon && binstaller';
+    export APP_START_COMMAND='pushd $JBOSS_HOME/bin; (./run.sh -c $JCONF -b $HNAME &); popd';
+    export APP_STOP_COMMAND='pushd $JBOSS_HOME/bin; ./shutdown.sh -Djava.net.preferIPv4Stack=true -o $HNAME -r $SDPORT -S; popd';
+    APP_START_COMMAND_JETTY='pushd $JETTY_HOME;(java -jar -XX:+UseG1GC -XX:+UseCompressedOops -Xms${JMEMSIZE} -Xmx${JMEMSIZE} -Xss${JSKSIZE} -Xbootclasspath/p:/opt/rmidirect/rmidirect-1.0.0.jar -Djava.net.preferIPv4Stack=true -Dcom.sun.management.jmxremote -Djava.rmi.server.hostname=${HNAME} -Dcom.sun.management.jmxremote.host=${HNAME} -Dcom.sun.management.jmxremote.port=1090 -Dcom.sun.management.jmxremote.rmi.port=1090 -Dcom.sun.management.jmxremote.local.only=false -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -agentlib:jdwp=transport=dt_socket,address=${HNAME}:8787,server=y,suspend=${SUSPEND} ./start.jar jetty.http.host=${HNAME} jetty.base=${JETTY_BASE} STOP.PORT=${SDPORT} STOP.KEY=nexagestop &); popd';
+    APP_STOP_COMMAND_JETTY='pushd $JETTY_HOME; java -jar ./start.jar STOP.PORT=${SDPORT} STOP.KEY=nexagestop --stop; popd';
+    alias cdroot='cd $JBOSS_HOME/server/$JCONF/deploy/ROOT.war';
+    alias validate='valprep Mediation';
+}
+
+function qjobs() {
+    export JOBS_HOME=/opt/quartzdesk.jobs;
+    export TAG_PREFIX=Jobs;
+    export BRANCH=$1;
+    export INSTALLER_PROJECT=jobs-installer;
+    export INSTALL_DIR=$INSTALL_HOME/jobs;
+    setws $DEFAULT_WORKSPACE
+    setCDPATH;
+    export APP_BUILD_COMMAND='bdwcs && bjobs && binstaller';
+    export APP_START_COMMAND='pushd $JBOSS_HOME/bin; (./run.sh -Dnexage.port.offset=$PORTOFFSET -c $JCONF -b 0.0.0.0 &); popd';
+    export APP_STOP_COMMAND='pushd $JBOSS_HOME/bin; ./shutdown.sh -Djava.net.preferIPv4Stack=true -r $SDPORT -S; popd';
+    alias cdroot='cd $JBOSS_HOME/server/$JCONF/deploy/ROOT.war';
+    settitle "jobs $1";
+}
+
+function flume() {
+    export FLUME_HOME=/opt/flumes/apache-flume-1.4.0-bin
+    export TAG_PREFIX=FLUME;
+    export BRANCH=$1;
+    export INSTALLER_PROJECT=flume-dispatcher-installer;
+    export INSTALL_DIR=$INSTALL_HOME/flume;
+    setws $DEFAULT_WORKSPACE
+    setCDPATH;
+    export APP_BUILD_COMMAND='butils && beventcom && beventflume && binstaller';
+    export APP_START_COMMAND='pushd /home/skatz/flumetest; ($FLUME_HOME/bin/flume-ng-cygwin agent --conf . --conf-file flume.conf --name a1 -Dflume.root.logger=INFO,console) ; popd';
+#    export APP_STOP_COMMAND='pushd $FLUME_HOME/bin; ./shutdown.sh -Djava.net.preferIPv4Stack=true -r $SDPORT -S; popd';
+    alias cdroot='cd $FLUME_HOME/server/$JCONF/deploy/ROOT.war';
+    settitle "flume $1";
+}
+
+function enode() {
+#    export HTTPPORT=8080
+#    export SDPORT=1090;
+#    export DEBUGPORT=8686;
+    setPortsToDefault
+    export HNAME=exchange-node1.sbx
+    export JCONF=enode;
+    export INSTALL_DIR=$INSTALL_HOME/exchange_node;
+    exchange $1;
+    settitle "enode $1";
+}
+
+function enode2() {
+#    export HTTPPORT=8480
+#    export SDPORT=1490;
+#    export DEBUGPORT=9686;
+    setPortsToDefault
+    export HNAME=exchange-node2.sbx
+    export JCONF=enode2;
+    export INSTALL_DIR=$INSTALL_HOME/exchange_node2;
+    exchange $1;
+    settitle "enode2 $1";
+}
+
+function ecommon() {
+#    export HTTPPORT=8180
+#    export SDPORT=1190;
+#    export DEBUGPORT=8787;
+    setPortsToDefault
+    export JCONF=ecommon;
+    export HNAME=exchange-common1.sbx
+    export INSTALL_DIR=$INSTALL_HOME/exchange_common;
+    exchange $1;
+    settitle "ecommon $1";
+}
+
+function ecommon2() {
+#    export HTTPPORT=8580
+#    export SDPORT=1590;
+#    export DEBUGPORT=9787;
+    setPortsToDefault
+    export JCONF=ecommon2;
+    export HNAME=exchange-common2.sbx
+    export INSTALL_DIR=$INSTALL_HOME/exchange_common2;
+    exchange $1;
+    settitle "ecommon2 $1";
+}
+
+function exchange() {
+    export TAG_PREFIX=EXCH;
+    export BRANCH=$1;
+    export INSTALLER_PROJECT=exchange-installer;
+    setws $DEFAULT_WORKSPACE
+    setCDPATH;
+    export APP_BUILD_COMMAND='bagg && beventcom && bcache && bexchc && bexch && bnconnect && befront && binstaller';
+    export APP_START_COMMAND='pushd $JBOSS_HOME/bin; (./run.sh -c $JCONF -b $HNAME &); popd';
+    export APP_STOP_COMMAND='pushd $JBOSS_HOME/bin; ./shutdown.sh -Djava.net.preferIPv4Stack=true -o $HNAME -r $SDPORT -S; popd';
+    alias cdroot='cd $JBOSS_HOME/server/$JCONF/deploy/ROOT.war'
+    alias validate='valprep Exchange';
+}
+
+function reportingapi() {
+    export PORTOFFSET=100
+    export HTTPPORT=8180
+    export SDPORT=1190
+    export JCONF=reportapi
+    export HNAME=localhost
+    export INSTALL_DIR=$INSTALL_HOME/report_api
+    meta_athens $1
+    settitle "reportingapi $1"
+}
+
+function geneva() {
+    setPortsToDefault
+    export JCONF=geneva
+    export HNAME=geneva.sbx
+    export INSTALL_DIR=$INSTALL_HOME/geneva
+    export TAG_PREFIX=GENEVA
+    export BRANCH=$1
+    setws $GITSPACE
+    setCDPATH;
+    #export APP_BUILD_COMMAND='bgcore && bgeneva && bgconf && binstaller';
+    export APP_BUILD_COMMAND='bgcore && bgeneva && binstaller';
+    export APP_START_COMMAND='pushd $JBOSS_HOME/bin; (./run.sh -Dnexage.port.offset=$PORTOFFSET -c $JCONF -b geneva.sbx &); popd';
+    export APP_STOP_COMMAND='pushd $JBOSS_HOME/bin; ./shutdown.sh -Djava.net.preferIPv4Stack=true -r $SDPORT -S; popd';
+    alias cdroot='cd $JBOSS_HOME/server/$JCONF/deploy/ROOT.war'
+    settitle "geneva $1";
+    export INSTALLER_PROJECT=geneva-installer;
+	echo $APP_START_COMMAND
+}
+
+function meta_athens() {
+    export TAG_PREFIX=REPORTAPI
+    export BRANCH=$1
+    export INSTALLER_PROJECT=sparta-installer
+    setws $DEFAULT_WORKSPACE
+    setCDPATH;
+    export APP_BUILD_COMMAND='bcore && bdwNT && bcountry && brapiNT && bagg && binstaller'
+    export APP_START_COMMAND='pushd $JBOSS_HOME/bin; (./run.sh -Dnexage.port.offset=$PORTOFFSET -c $JCONF -b 0.0.0.0 &); popd'
+    export APP_STOP_COMMAND='pushd $JBOSS_HOME/bin; ./shutdown.sh -Djava.net.preferIPv4Stack=true -r $SDPORT -S; popd'
+    alias cdroot='cd $JBOSS_HOME/server/$JCONF/deploy/ROOT.war'
+}
+
+function dbinstall() {
+    export TAG_PREFIX=DB;
+    export BRANCH=$1;
+    export INSTALL_DIR=$INSTALL_HOME/db;
+    export INSTALLER_PROJECT=database-installer;
+    setws $DEFAULT_WORKSPACE
+    export APP_BUILD_COMMAND='binstaller';
+    alias validate='valprep Database';
+    settitle "dbinstall $1";
+}
+
+function asnode() {
+#    export HTTPPORT=8380
+#    export SDPORT=1390;
+#    export DEBUGPORT=8787;
+    setPortsToDefault
+    export JCONF=asnode;
+    export HNAME=adserver-node1.sbx
+    export INSTALL_DIR=$INSTALL_HOME/asnode
+    adserver $1
+    settitle "asnode $1"
+}
+
+function asnode2() {
+#    export HTTPPORT=8780
+#    export SDPORT=1790;
+#    export DEBUGPORT=9680;
+    setPortsToDefault
+    export INSTALL_DIR=$INSTALL_HOME/asnode2
+    export HNAME=adserver-node2.sbx
+    export JCONF=asnode2
+    adserver $1
+    settitle "asnode2 $1"
+}
+
+function ascommon() {
+#    export HTTPPORT=8180
+#    export SDPORT=1190;
+#    export DEBUGPORT=8688;
+    setPortsToDefault
+    export INSTALL_DIR=$INSTALL_HOME/ascommon
+    export JCONF=ascommon
+    export HNAME=adserver-common1.sbx
+    adserver $1
+    settitle "ascommon $1"
+}
+
+function ascommon2() {
+#    export HTTPPORT=8580
+#    export SDPORT=1590;
+#    export DEBUGPORT=9688;
+    setPortsToDefault
+    export JCONF=ascommon2
+    export INSTALL_DIR=$INSTALL_HOME/ascommon2
+    export HNAME=adserver-common2.sbx
+    adserver $1
+    settitle "ascommon2 $1";
+}
+
+function adserver() {
+    export TAG_PREFIX=ADSERVER
+    export BRANCH=$1
+    export INSTALLER_PROJECT=adserver-installer
+    setws $DEFAULT_WORKSPACE
+    setCDPATH
+    export APP_BUILD_COMMAND='basmodel && bagg && bcache && basnode && bascommon && binstaller'
+    export APP_START_COMMAND='pushd $JBOSS_HOME/bin; (./run.sh -Dnexage.port.offset=$PORTOFFSET -c $JCONF -b $HNAME &); popd'
+    export APP_STOP_COMMAND='pushd $JBOSS_HOME/bin; ./shutdown.sh -Djava.net.preferIPv4Stack=true -r $SDPORT -S; popd'
+    alias cdroot='cd $JBOSS_HOME/server/$JCONF/deploy/ROOT.war'
+}
+
+function hazel() {
+    setPortsToDefault
+    export HNAME=localhost
+#    export SDPORT=1090;
+#    export DEBUGPORT=8787;
+#    export JCONF=bnode;
+    export INSTALL_DIR=$INSTALL_HOME/hazelcast;
+    export INSTALLER_PROJECT=bidder-installer;
+    export BRANCH=$1;
+    export TAG_PREFIX=BIDDER;
+    setws $DEFAULT_WORKSPACE
+    export APP_BUILD_COMMAND='binstaller';
+#    bidder $1;
+    export APP_START_COMMAND='$HAZEL_HOME/bin/nexage-server.sh &';
+    export APP_STOP_COMMAND='$HAZEL_HOME/bin/nexage-stop.sh';
+    settitle "hazelcast $1";
+}
+
+function bnode() {
+    export PORTOFFSET=0
+    export HTTPPORT=8080
+    export SDPORT=1090
+    export DEBUGPORT=8787
+    export JCONF=bnode
+    export INSTALL_DIR=$INSTALL_HOME/bidder_node
+    bidder $1
+    settitle "bnode $1"
+}
+
+function bnode2() {
+    export PORTOFFSET=400
+    export HTTPPORT=8480
+    export SDPORT=1490
+    export DEBUGPORT=9787
+    export JCONF=bnode2
+    export INSTALL_DIR=$INSTALL_HOME/bidder_node2
+    bidder $1
+    settitle "bnode2 $1"
+}
+
+function bcommon() {
+    export PORTOFFSET=100
+    export HTTPPORT=8180
+    export DEBUGPORT=8686
+    export SDPORT=1190
+    export JCONF=bcommon
+    export INSTALL_DIR=$INSTALL_HOME/bidder_common
+    bidder $1
+    settitle "bcommon $1"
+}
+
+function bcommon2() {
+    export PORTOFFSET=500
+    export HTTPPORT=8580
+    export DEBUGPORT=9686
+    export SDPORT=1590
+    export JCONF=bcommon2
+    export INSTALL_DIR=$INSTALL_HOME/bidder_common2
+    bidder $1
+    settitle "bcommon2 $1"
+}
+
+function bidder() {
+    export HNAME=localhost
+    export TAG_PREFIX=BIDDER
+    export BRANCH=$1
+    export INSTALLER_PROJECT=bidder-installer
+    setws $DEFAULT_WORKSPACE
+    setCDPATH
+    export APP_BUILD_COMMAND='butils && bgeo && bbshared && bbmodel && bagg && bvisual && bbcommon && bbnode && binstaller'
+    export APP_START_COMMAND='pushd $JBOSS_HOME/bin; (./run.sh -Dnexage.port.offset=$PORTOFFSET -c $JCONF -b 0.0.0.0 &); popd'
+    export APP_STOP_COMMAND='pushd $JBOSS_HOME/bin; ./shutdown.sh -Djava.net.preferIPv4Stack=true -r $SDPORT -S; popd'
+    alias cdroot='cd $JBOSS_HOME/server/$JCONF/deploy/ROOT.war'
+    alias validate='valprep Bidder'
+}
+
+function bnodetom() {
+    export HNAME=localhost
+    setPortsToDefault
+    export CATALINA_OPTS="-server -XX:+PrintGCDetails -XX:+PrintGCDateStamps -Xloggc:/tmp/bnode/gc.stats -XX:+UseConcMarkSweepGC -XX:+UseCompressedOops -Xms1024m -Xmx1024m -Xss192k -XX:MaxPermSize=256m -Dlog4j.debug -Djboss.server.data.dir=C:/opt/jbosses/jboss-6.1.0.Final/server/bnode/data"
+    export APP_START_COMMAND='pushd $TOMCAT_HOME/bin; catalina.sh jpda start; popd'
+    export APP_STOP_COMMAND='pushd $TOMCAT_HOME/bin; ./shutdown.sh; popd'
+    settitle "bnodetom"
+}
+
+
+function tests() {
+    setws $DEFAULT_WORKSPACE
+    alias mfmstests='pushd $WORKSPACE/nexage-functionaltests && mvn clean test -Dtest=MDLT_FT24_AggregateMultipleSourcesTest && popd'
+    alias mfatests='pushd $WORKSPACE/nexage-functionaltests && mvn clean test -Dtest=MDLT_FT999_Fact_Traffic_Non_SDK,MDLT_FT999_Aggregation,MDLT_FT23_CostPerInstallTest && popd'
+    alias mftests='pushd $WORKSPACE/nexage-functionaltests && mvn clean package -Dtest=com.nexage.ft.mediation.test.FT*Test && popd'
+    alias asftests='pushd $WORKSPACE/nexage-functionaltests && mvn clean package -Dtest=com.nexage.ft.adserver.test.ASFT* && popd'
+    alias eftests='pushd $WORKSPACE/functionaltest-exchange && mvn clean package -Dtest=Functional*,CRFT* && popd'
+    alias jtests='pushd $WORKSPACE/nexage-functionaltests && mvn clean package -Dtest=com.nexage.ft.jobs.test.Jobs*Test && popd'
+    settitle "Tests"
+}
+
+function selectJboss() {
+    export JBOSS_HOME=$1
+    settitle "${2:-jbossUnspecified} $1"
+}
+
+alias installc='install c'
+
+function install() {
+    local directory=$WORKSPACE/$INSTALLER_PROJECT;
+    local mode=swing;
+    if [[ "$1" == 'c' ]]
+      then
+        mode=text-auto;
+    fi
+    if [[ ! -z $BRANCH ]]
+      then
+        directory=$directory"-"$BRANCH;
+    fi
+    if [[ "$OSTYPE" == "cygwin" ]]; then
+        echo "using cywin path"; mkdir -p $INSTALL_DIR; pushd $INSTALL_DIR; java -jar `cygpath -w $WORKSPACE/$INSTALLER_PROJECT/target/*.jar` $mode; popd;
+    else
+        mkdir -p $INSTALL_DIR; pushd $INSTALL_DIR; echo "y" | java -jar $directory/target/*.jar $mode; popd;
+    fi
+}
+
+alias cdw='cd $WORKSPACE'
+alias cdj='cd $JBOSS_HOME'
+alias clearlog='cat > $JBOSS_HOME/server/$JCONF/log/server.log < /dev/null; cat > $JBOSS_HOME/server/$JCONF/log/boot.log < /dev/null'
+
+alias bagg='builder $WORKSPACE/aggregator-common'
+alias bnexus='builder $WORKSPACE/nexus'
+alias bmcommon='builder $WORKSPACE/mediation-common'
+alias bcacheNT='builderNoTest $WORKSPACE/nexage-cache'
+alias bcache='builder $WORKSPACE/nexage-cache'
+alias bcore='builder $WORKSPACE/nexage-core'
+alias bcoreNT='builderNoTest $WORKSPACE/nexage-core'
+alias bexchNT='builderNoTest $WORKSPACE/nexage-exchange'
+alias bexch='builder $WORKSPACE/nexage-exchange'
+alias bexchc='builder $WORKSPACE/nexage-exchange-common'
+alias bnconnect='builder $WORKSPACE/nexage-connect'
+alias befront='builder $WORKSPACE/exchange-bidder-test-frontend'
+alias bmmodel='builder $WORKSPACE/mediation-model'
+alias bmnode='builder $WORKSPACE/mediation-node'
+alias bmnodeNT='builderNoTest $WORKSPACE/mediation-node'
+alias butils='builder $WORKSPACE/nexage-utils'
+alias bcountry='builder $WORKSPACE/country-service'
+alias bascommon='builder $WORKSPACE/adserver-common'
+alias basnode='builder $WORKSPACE/adserver-node'
+alias basmodel='builder $WORKSPACE/adserver-model'
+alias bgconf='builder $GITSPACE/geneva-config'
+alias bgcore='builder $GITSPACE/geneva-core'
+alias bgeneva='builder $GITSPACE/geneva-server'
+alias bbmodel='builder $WORKSPACE/bidder-model'
+alias bbnode='builder $WORKSPACE/bidder-node'
+alias bvisual='builder $WORKSPACE/hazelcastvisual'
+alias bgeo='builder $WORKSPACE/geography-service'
+alias bbcommon='builder $WORKSPACE/bidder-common'
+alias bbshared='builder $WORKSPACE/bidder-shared-data'
+# To build nexage-dw you need to configure the test env
+# to point at your external mysql instance, see:  src/test/resource/db.properties
+alias bdw='builder $GITSPACE/nexage-dw'
+alias bdwNT='builderNoTest $GITSPACE/nexage-dw'
+alias brapi='builder $WORKSPACE/reporting-api'
+alias brapiNT='builderNoTest $WORKSPACE/reporting-api'
+alias bservice='builder $WORKSPACE/nexage-services'
+# To build the client you need to install the flash player on the path and it needs
+# to be called 'flashplayer.exe'
+alias bclient='builder $WORKSPACE/AdminClient'
+alias bclientNT='builderNoTest $WORKSPACE/AdminClient'
+alias bxclientNT='builderNoTest $WORKSPACE/sparta-client'
+alias bsclientNT='builderNoTest $WORKSPACE/SpartaClient'
+alias binstaller='builder $WORKSPACE/$INSTALLER_PROJECT -Dtag.prefix=$TAG_PREFIX'
+alias beventcom='builder $WORKSPACE/eventdata-common'
+alias beventflume='builder $WORKSPACE/eventdata-flume'
+alias bclickms='builder $WORKSPACE/click-maintenance-service'
+alias bjobs='builder $WORKSPACE/quartzdeskjobs'
+alias bdwcs='builder $WORKSPACE/dw-core-sync'
+
+
+alias jtail='tail -F $JBOSS_HOME/server/$JCONF/log/server.log'
+
+function jdeploy() { cp $1 $JBOSS_HOME/server/$JCONF/deploy; }
+
+function valprep() {
+    PREFIX=$1;
+    rm -f $WORKSPACE/$INSTALLER_PROJECT/target/*.jar;
+    cp $KIT_REPO/$PREFIX* $WORKSPACE/$INSTALLER_PROJECT/target;
+}
+
+function wait_for_server() {
+  BASE_URL_TO_CHECK=${1:-"http://$HNAME:$HTTPPORT"}
+  TIME_TO_CHECK=${2:-90}
+  echo "$BASE_URL_TO_CHECK - waiting for jmx console with timeout of $TIME_TO_CHECK"
+
+  NO_POSITIVE_RESPONSE_YET=1
+  for I in $(seq 1 $TIME_TO_CHECK); do
+    curl -u admin:nexage2010 $BASE_URL_TO_CHECK/jmx-console/ 2>/dev/null | grep -c 'JBoss JMX Management Console' >/dev/null
+    if [[ "$?" == "0" ]]; then
+      NO_POSITIVE_RESPONSE_YET=0
+      echo breakout
+      break
+    fi
+    sleep 1
+  done
+
+  if [[ "$NO_POSITIVE_RESPONSE_YET" == 0 ]]; then
+    echo "$BASE_URL_TO_CHECK - ok!"
+  else
+    echo "ERROR!"
+  fi
+  return $NO_POSITIVE_RESPONSE_YET
+}
