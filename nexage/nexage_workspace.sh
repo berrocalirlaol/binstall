@@ -15,3 +15,7 @@ echo ${user_password} | sudo -S chown -R ${ENV_USER} ${WORKSPACE}/installs
 echo ${user_password} | sudo -S chgrp -R $ENV_USER ${WORKSPACE}/installs
 
 cp -r ./nexage/installs/ ${WORKSPACE}/installs/
+
+cat env_variables >> ~/.bashrc
+cat path >> ~/.bashrc
+
